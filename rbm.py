@@ -37,7 +37,8 @@ class RBM(object):
         # 1. set visible state to training sample(x) and compute hidden state(h0) of data
         #    then we have binary units of hidden state computed. It is very important to make these
         #    hidden states binary, rather than using the probabilities themselves. (see Hinton paper)
-        self.h0prob = transfer_function(tf.matmul(self.x, self.rbm_w) + self.rbm_hb)
+        self.h0activations = tf.matmul(self.x, self.rbm_w) + self.rbm_hb
+        self.h0prob = transfer_function(self.h0activations)
         self.h0 = self.sample_prob(self.h0prob)
         # 2. compute new visible state of reconstruction based on computed hidden state reconstruction.
         #    However, it is common to use the probability, instead of sampling a binary value.
@@ -69,6 +70,13 @@ class RBM(object):
         self.sess = tf.Session()
         self.sess.run(init)
 
+        # free energy, F(v)
+        rbm_vb_expanded = tf.expand_dims(self.rbm_vb, axis=1)
+        f1 = tf.matmul(self.x, rbm_vb_expanded)
+        f2 =  tf.reduce_sum(tf.log(1 + tf.exp(self.h0activations)), axis=1)
+        self.fv = tf.reduce_mean(-f1-f2)
+
+        
     def compute_cost(self, batch):
         # Use it but don?t trust it. If you really want to know what is going on use multiple histograms.
         # Although it is convenient, the reconstruction error is actually a very poor measure of the progress.
@@ -105,20 +113,20 @@ class RBM(object):
         self.o_vb = self.weights['vb'].eval(self.sess)
         self.o_hb = self.weights['hb'].eval(self.sess)
 
-    def save_weights(self, path):
+    def save_weights(self, path, global_step):
         self.sess.run(self.weights['w'].assign(self.o_w))
         self.sess.run(self.weights['vb'].assign(self.o_vb))
         self.sess.run(self.weights['hb'].assign(self.o_hb))
         saver = tf.train.Saver({self.layer_names[0]: self.weights['w'],
                                 self.layer_names[1]: self.weights['vb'],
                                 self.layer_names[2]: self.weights['hb']})
-        save_path = saver.save(self.sess, path)
+        save_path = saver.save(self.sess, path, global_step=global_step)
 
     def return_weights(self):
         return self.weights
 
     def return_hidden_weight_as_np(self):
-        return self.n_w
+        return self.n_w, self.n_vb, self.n_hb
 
     def partial_fit(self, batch_x):
         # 1. always use small ?mini-batches? of 10 to 100 cases.
@@ -133,3 +141,20 @@ class RBM(object):
 
         return self.sess.run(self.err_sum, feed_dict={self.x: batch_x, self.rbm_w: self.n_w, self.rbm_vb: self.n_vb,
                                                       self.rbm_hb: self.n_hb})
+
+
+    def free_energy_ratio(self, Xtrain, Xvalid):
+
+        Xtr_fv = self.sess.run(self.fv, feed_dict={self.x: Xtrain,
+                                                self.rbm_w: self.n_w,
+                                                self.rbm_vb: self.n_vb,
+                                                self.rbm_hb: self.n_hb})
+    
+        Xvalid_fv = self.sess.run(self.fv, feed_dict={self.x: Xvalid,
+                                                self.rbm_w: self.n_w,
+                                                self.rbm_vb: self.n_vb,
+                                                self.rbm_hb: self.n_hb})
+
+        return Xvalid_fv - Xtr_fv
+
+    
